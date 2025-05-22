@@ -1,0 +1,159 @@
+name: Build and Deploy
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21.1'
+
+      - name: Run tests
+        run: go test -v ./...
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=short
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  release:
+    # Permissions: 'write' might be needed if git operations are added later,
+    # 'read' is likely sufficient for checkout only. 'packages: write' is NOT needed for Docker Hub.
+    permissions:
+      contents: write
+    runs-on: ubuntu-22.04 # Use the same runner as the example
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4 # Use latest major version
+        with:
+          # Fetch depth 0 is needed for diffing against HEAD^
+          fetch-depth: 0
+
+      - name: Configure Git # Needed for git diff command
+        run: |
+          git config user.name "$GITHUB_ACTOR"
+          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+
+      - name: Set up Helm # Explicitly install Helm
+        uses: azure/setup-helm@v4
+        # Optionally specify version:
+        # with:
+        #   version: v3.13.0
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Determine changed charts
+        id: changed-charts
+        run: |
+          set -e
+          # Get list of changed files in charts/ directory compared to previous commit on main
+          # Extract unique chart directory names (e.g., charts/mychart)
+          # Ensure paths starting with 'charts/' are processed
+          changed_dirs=$(git diff --name-only HEAD^ HEAD -- charts/ | grep '^charts/' | awk -F/ '{print $1"/"$2}' | uniq)
+          if [ -z "$changed_dirs" ]; then
+            echo "No changes detected in charts directories."
+            echo "dirs=" >> $GITHUB_OUTPUT
+          else
+            echo "Changed chart directories: $changed_dirs"
+            # Output the list for the next step, handling potential multi-line output
+            echo "dirs<<EOF" >> $GITHUB_OUTPUT
+            echo "$changed_dirs" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Package and Push Changed Charts to Docker Hub
+        # Only run if changed_dirs is not empty
+        if: steps.changed-charts.outputs.dirs != ''
+        run: |
+          set -e
+          echo "Processing changed chart directories..."
+          # Use the captured multi-line output correctly
+          echo "${{ steps.changed-charts.outputs.dirs }}" | while IFS= read -r chart_dir; do
+            # Skip empty lines just in case
+            if [ -z "$chart_dir" ]; then
+              continue
+            fi
+
+            if [ -f "$chart_dir/Chart.yaml" ]; then
+              echo "Processing chart in $chart_dir"
+
+              # Fetch dependencies defined in Chart.yaml/Chart.lock
+              echo "Building dependencies for $chart_dir"
+              helm dependency build "$chart_dir"
+
+              # Package the chart - Helm determines package name (e.g., chartname-version.tgz)
+              # Package into a temporary directory to avoid polluting the root
+              package_dir=$(mktemp -d)
+              echo "Packaging $chart_dir into $package_dir"
+              helm package "$chart_dir" --destination "$package_dir"
+
+              # Find the generated package file
+              package_file=$(find "$package_dir" -name '*.tgz' | head -n 1)
+              if [ -z "$package_file" ]; then
+                echo "Error: Could not find packaged chart file for $chart_dir in $package_dir"
+                rm -rf "$package_dir"
+                exit 1
+              fi
+
+              # Use the namespace from the example workflow
+              oci_repo="oci://docker.io/degoke"
+              echo "Pushing $package_file to $oci_repo"
+              # Push using OCI - Helm derives repo name from chart name
+              helm push "$package_file" "$oci_repo"
+
+              # Clean up temporary package directory
+              rm -rf "$package_dir"
+            else
+              echo "Skipping $chart_dir, not a valid chart directory (no Chart.yaml)"
+            fi
+          done
+          echo "Chart release process finished." 

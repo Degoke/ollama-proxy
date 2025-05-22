@@ -1,0 +1,87 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ollama-proxy.fullname" . }}
+  labels:
+    {{- include "ollama-proxy.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "ollama-proxy.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "ollama-proxy.selectorLabels" . | nindent 8 }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.config.port }}
+              protocol: TCP
+          env:
+            - name: OLLAMA_HOST
+              value: {{ .Values.config.ollamaHost | quote }}
+            - name: PORT
+              value: {{ .Values.config.port | quote }}
+            - name: READ_TIMEOUT
+              value: {{ .Values.config.readTimeout | quote }}
+            - name: WRITE_TIMEOUT
+              value: {{ .Values.config.writeTimeout | quote }}
+            - name: IDLE_TIMEOUT
+              value: {{ .Values.config.idleTimeout | quote }}
+            - name: METRICS_ENABLED
+              value: {{ .Values.config.metricsEnabled | quote }}
+            - name: METRICS_PATH
+              value: {{ .Values.config.metricsPath | quote }}
+            - name: LOG_LEVEL
+              value: {{ .Values.config.logLevel | quote }}
+            - name: RATE_LIMIT
+              value: {{ .Values.config.rateLimit | quote }}
+            - name: RATE_LIMIT_BURST
+              value: {{ .Values.config.rateLimitBurst | quote }}
+            - name: EXTERNAL_VALIDATION_URL
+              value: {{ .Values.config.externalValidationUrl | quote }}
+            - name: EXTERNAL_METRICS_URL
+              value: {{ .Values.config.externalMetricsUrl | quote }}
+            - name: API_KEY_HEADER_NAME
+              value: {{ .Values.config.apiKeyHeaderName | quote }}
+            - name: EXTERNAL_SERVER_API_KEY
+              value: {{ .Values.config.externalServerApiKey | quote }}
+            - name: EXTERNAL_SERVER_CERT
+              value: {{ .Values.config.externalServerCert | quote }}
+            - name: SKIP_TLS_VERIFY
+              value: {{ .Values.config.skipTlsVerify | quote }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }} 

@@ -1,0 +1,12 @@
+apiVersion: v2
+name: ollama-proxy
+description: A Helm chart for Ollama Proxy
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+maintainers:
+  - name: Adegoke Adewoye
+keywords:
+  - ollama
+  - proxy
+  - ai 

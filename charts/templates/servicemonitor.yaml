@@ -1,0 +1,26 @@
+{{- if and .Values.serviceMonitor.enabled .Values.config.metricsEnabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "ollama-proxy.fullname" . }}
+  namespace: {{ .Values.serviceMonitor.namespace }}
+  labels:
+    {{- include "ollama-proxy.labels" . | nindent 4 }}
+    {{- with .Values.serviceMonitor.additionalLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  endpoints:
+    {{- range .Values.serviceMonitor.endpoints }}
+    - port: {{ .port }}
+      path: {{ .path }}
+      interval: {{ .interval }}
+      scrapeTimeout: {{ $.Values.serviceMonitor.scrapeTimeout }}
+    {{- end }}
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  selector:
+    matchLabels:
+      {{- include "ollama-proxy.selectorLabels" . | nindent 6 }}
+{{- end }} 

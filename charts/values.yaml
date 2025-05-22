@@ -1,0 +1,87 @@
+# Default values for ollama-proxy
+replicaCount: 1
+
+image:
+  repository: ollama-proxy
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8080
+
+# Ingress configuration
+ingress:
+  enabled: false
+  className: "nginx"
+  annotations: {}
+  hosts:
+    - host: ollama-proxy.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+# Horizontal Pod Autoscaler configuration
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: 80
+
+# ServiceMonitor configuration for Prometheus
+serviceMonitor:
+  enabled: false
+  interval: 30s
+  scrapeTimeout: 10s
+  namespace: monitoring
+  additionalLabels: {}
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+config:
+  # Ollama service configuration
+  ollamaHost: "http://ollama:11434"
+  # Server configuration
+  port: 8080
+  readTimeout: 30
+  writeTimeout: 30
+  idleTimeout: 120
+  # Metrics configuration
+  metricsEnabled: true
+  metricsPath: "/metrics"
+  # Logging configuration
+  logLevel: "info"
+  # Rate limiting
+  rateLimit: 100
+  rateLimitBurst: 200
+  # External services configuration
+  externalValidationUrl: "http://external-server.com/validate"
+  externalMetricsUrl: "http://external-server.com/log_metrics"
+  apiKeyHeaderName: "X-API-Key"
+  externalServerApiKey: ""
+  externalServerCert: ""
+  skipTlsVerify: false
+
+# Pod annotations
+podAnnotations: {}
+
+# Node selector
+nodeSelector: {}
+
+# Tolerations
+tolerations: []
+
+# Affinity
+affinity: {} 
